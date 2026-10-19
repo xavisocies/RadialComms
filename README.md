@@ -58,3 +58,12 @@ puede que al pulsarlo se abra la rueda y además se ejecute la otra función.
 Con OvGME, desactiva el mod. Si lo copiaste a mano, borra `Scripts\Hooks\RadialComms-hook.lua`,
 `Scripts\RadialComms\` y los `Config\RadialComms*.lua`. Si asignaste un botón de joystick,
 borra también `Config\RadialCommsJoystick.lua` (OvGME no lo gestiona).
+
+## Licencia y autoría
+
+RadialComms © 2026 **xavisocies**.
+Licencia [Creative Commons Atribución-NoComercial 4.0 (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/deed.es) — texto completo en `LICENSE`.
+
+- Puedes usar, copiar, compartir y modificar el mod libremente.
+- Si lo compartes o lo modificas, debes citar al autor original (xavisocies), enlazar este repositorio e indicar si hiciste cambios.
+- No se puede vender ni usar con fines comerciales.
