@@ -67,3 +67,8 @@ Licencia [Creative Commons Atribución-NoComercial 4.0 (CC BY-NC 4.0)](https://c
 - Puedes usar, copiar, compartir y modificar el mod libremente.
 - Si lo compartes o lo modificas, debes citar al autor original (xavisocies), enlazar este repositorio e indicar si hiciste cambios.
 - No se puede vender ni usar con fines comerciales.
+
+## Aviso
+
+RadialComms es un mod de aficionado, independiente y gratuito. **No está afiliado, patrocinado ni respaldado por Eagle Dynamics SA.**
+DCS World y los nombres relacionados son marcas de sus respectivos propietarios, y se mencionan solo para indicar con qué es compatible el mod.
