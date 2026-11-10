@@ -10,6 +10,7 @@ local J = {}
 
 local LAYER = "RadialComms"
 local BASE = 10000 -- igual que maxCommandValue de AddComboDialog.lua
+local BASE_UP = 20000 -- accion al SOLTAR el boton (distinta de la de pulsar)
 
 function J.new(opts)
     local log = opts.log
@@ -110,12 +111,13 @@ function J.new(opts)
             local id = I.getDeviceId(self.assigned.device)
             self.assigned.event = ev
             self.assigned.deviceId = id
-            I.addKeyCombo(LAYER, ev, id, nil, ev + BASE, nil, nil)
+            -- addKeyCombo(capa, evento, mando, reformers, down, pressed, up): pulsar y soltar
+            I.addKeyCombo(LAYER, ev, id, nil, ev + BASE, nil, ev + BASE_UP)
             I.setTopLayer(LAYER)
         end)
         if not ok then log("JOY: error creando la capa: " .. tostring(err)); return false, err end
         self.layerOn = true
-        log("JOY: capa lista para " .. self.assigned.device .. " / " .. self.assigned.button)
+        log("JOY: capa lista para " .. self.assigned.device .. " / " .. self.assigned.button .. " (pulsar y soltar)")
         return true
     end
 
@@ -175,9 +177,10 @@ function J.new(opts)
         return nil
     end
 
-    -- Se llama en cada frame. onPress() se invoca al pulsar el boton asignado.
+    -- Se llama en cada frame. onPress(now) se invoca al pulsar el boton asignado y onUp(now)
+    -- (opcional) al soltarlo; solo cuenta el mando en el que se asigno.
     -- onLearned(device, button) / onTimeout() durante el modo aprender.
-    function self.poll(now, onPress, onLearned, onTimeout)
+    function self.poll(now, onPress, onLearned, onTimeout, onUp)
         if not available() then return end
         if not (self.learning or self.assigned) then return end
 
@@ -202,9 +205,17 @@ function J.new(opts)
                         buildAssigned()
                         onLearned(hit.device, hit.button)
                     end
-                elseif self.assigned and self.assigned.event and a.action == self.assigned.event + BASE
+                elseif self.assigned and self.assigned.event
                     and tostring(a.deviceId) == tostring(self.assigned.deviceId) then
-                    onPress()
+                    if a.action == self.assigned.event + BASE then
+                        onPress(now)
+                    elseif a.action == self.assigned.event + BASE_UP then
+                        if not self.upSeen then
+                            self.upSeen = true
+                            log("JOY: DCS entrega la accion de soltar el boton")
+                        end
+                        if onUp then onUp(now) end
+                    end
                 end
             end
         end

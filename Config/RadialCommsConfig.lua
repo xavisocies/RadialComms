@@ -9,6 +9,11 @@ return {
     -- del joystick y poner aqui esa tecla, p. ej. hotkey = "f13"; validas f1..f15.)
     joystickButton = true,
 
+    -- Con el boton de joystick: una pulsacion LARGA abre o cierra la rueda y una CORTA hace clic
+    -- sobre la cuña resaltada. Segundos que hay que mantenerlo para que cuente como larga
+    -- (un numero mayor que 0; si no es valido se usa 1).
+    longPressSeconds = 1.0,
+
     hotkey = "Ctrl+Shift+q",
 
     -- Cerrar la rueda automaticamente tras ejecutar una accion
@@ -26,12 +31,12 @@ return {
     headProbeInterval = 0.5, -- segundos entre muestras
     headProbeSamples = 60,   -- maximo de muestras por apertura (60 x 0.5 s = 30 s)
 
-    -- Seleccion con la cabeza (VR/TrackIR): al abrir la rueda se toma tu mirada como centro.
-    -- Gira la cabeza hacia una cuña para resaltarla y mantenla headDwell segundos para elegirla.
-    -- Vuelve al centro antes de elegir otra. EXPERIMENTAL, sin probar: desactivado por ahora.
-    headSelect = false,
-    headDwell = 1.0,    -- segundos mirando la cuña
-    headDeadzone = 7,   -- grados de giro antes de resaltar
+    -- Resaltar cuñas con la cabeza (VR/TrackIR): al abrir la rueda se toma tu mirada como centro.
+    -- Gira la cabeza hacia una cuña para resaltarla y pulsa el boton (pulsacion corta) para elegirla;
+    -- mirar una cuña nunca la ejecuta por si solo. Para volver atras, mira una cuña y luego al centro.
+    -- Ponlo en false para usar solo el cursor del raton.
+    headSelect = true,
+    headDeadzone = 7,   -- grados que hay que girar la cabeza antes de resaltar (mayor que 0; si no, 7)
 
     -- Ocultar en las listas de radio las estaciones que la radio no puede alcanzar ("[N/A]").
     hideUnavailable = true,

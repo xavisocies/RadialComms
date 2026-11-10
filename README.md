@@ -5,7 +5,7 @@ Menús: COM1, COM2, GROUND CREW y Herramientas.
 
 ## Instalación con OvGME
 
-1. Descarga `RadialComms-v0.9.0-OvGME.zip` desde Releases y descomprímelo en la biblioteca de mods de OvGME
+1. Descarga el zip `RadialComms-vX.Y.Z-OvGME.zip` de la última versión en Releases y descomprímelo en la biblioteca de mods de OvGME
    (destino del mod: `C:\Users\<tu usuario>\Saved Games\DCS`).
 2. Activa el mod en OvGME.
 3. Arranca DCS (si estaba abierto, ciérralo y vuelve a abrirlo).
@@ -33,15 +33,23 @@ hotkey = "Ctrl+Shift+q",
 Los nombres de tecla válidos están en `G:\DCS World\dxgui\bind\KeyNames.txt`
 (por ejemplo `"Ctrl+Alt+r"` o `"f13"`). Reinicia DCS para aplicar el cambio.
 
-## Abrir la rueda con un botón del joystick
+## Usar la rueda con un solo botón del joystick
 
-El mod puede usar cualquier botón de cualquier mando, sin software externo.
+Pensado para VR: **un único botón** del joystick sirve para todo.
 
-**Asignar el botón**
+| Pulsación | Con la rueda cerrada | Con la rueda abierta |
+|---|---|---|
+| **Larga** (mantener 1 s) | Abre la rueda | Cierra la rueda |
+| **Corta** | No hace nada | Clic sobre la cuña resaltada |
+
+Si sueltas el botón después de una pulsación larga no se hace ningún clic. Las pulsaciones muy breves
+(menos de 50 ms) se ignoran como ruido del botón.
+
+### Asignar el botón
 1. Abre la rueda con el teclado (Ctrl+Shift+Q).
 2. Pulsa **Herramientas** y luego **Asignar boton joystick**.
 3. Dentro de los 12 segundos siguientes, pulsa el botón del joystick que quieras usar.
-4. Aparece el aviso "Boton asignado". Desde ese momento ese botón abre y cierra la rueda.
+4. Aparece el aviso "Boton asignado". Desde ese momento ese botón funciona como se explica arriba.
 
 La asignación se guarda en `Saved Games\DCS\Config\RadialCommsJoystick.lua` y se recuerda entre sesiones.
 Si el botón es el mismo número en dos mandos, solo cuenta el mando en el que lo asignaste.
@@ -52,6 +60,25 @@ Si el botón es el mismo número en dos mandos, solo cuenta el mando en el que l
 
 **Consejo:** elige un botón que no tengas asignado a otra función en DCS. Si lo tienes asignado,
 puede que al pulsarlo se abra la rueda y además se ejecute la otra función.
+
+### Qué cuña se resalta: cursor o cabeza
+Con la rueda abierta se resalta la cuña que señala **el cursor del ratón** o la que **miras con la cabeza**,
+la que se haya movido en último lugar. La pulsación corta clica la que esté resaltada.
+
+- **Cabeza (VR o TrackIR):** al abrir la rueda, tu mirada de ese momento es el centro. Gira la cabeza
+  unos 7° hacia una cuña para resaltarla. **Mirar una cuña nunca la ejecuta por sí solo**: hay que pulsar el botón.
+- **Volver atrás con la cabeza:** mira una cuña (con opción) y vuelve a mirar al centro: el centro se resalta
+  y una pulsación corta retrocede (o cierra la rueda si estás en el menú principal). Justo al abrir la rueda
+  o al entrar en un submenú el centro no se resalta, para que una pulsación corta no cierre la rueda por error.
+- Los giros del propio avión no cuentan como movimiento de cabeza.
+
+### Opciones (`Saved Games\DCS\Config\RadialCommsConfig.lua`)
+```lua
+longPressSeconds = 1.0,  -- segundos manteniendo el botón para que cuente como larga
+headSelect = true,       -- resaltar cuñas con la cabeza (false = solo cursor)
+headDeadzone = 7,        -- grados que hay que girar la cabeza antes de resaltar
+```
+Reinicia DCS tras cambiarlas. Si el valor no es un número mayor que 0 se usa el de por defecto.
 
 ## Desinstalar
 

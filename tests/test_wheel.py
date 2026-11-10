@@ -3,12 +3,9 @@ from lupa.lua51 import LuaRuntime
 
 import os
 src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-wd = tempfile.mkdtemp(prefix="dcs_writedir_") + "/"
-shutil.copytree(f"{src_root}/Config", wd + "Config")
-shutil.copytree(f"{src_root}/Scripts", wd + "Scripts")
 
 test = r'''
-local WD = ...
+local WD, HEAD_ON = ...
 local statics = {}
 local hotkeys, buttons, window = {}, {}, nil
 local calls = {}
@@ -46,10 +43,14 @@ package.preload["dxgui"]  = function() return { GetScreenSize = function() retur
 
 -- ===== API Input simulada (como la del panel de controles) =====
 local layers, stack, pending = {}, {}, {}
+local layerUp = {}
 Input = {
   createLayer = function(n) layers[n] = {} end,
   deleteLayer = function(n) layers[n] = nil; for i=#stack,1,-1 do if stack[i]==n then table.remove(stack,i) end end end,
-  addKeyCombo = function(l, ev, dev, ref, down) layers[l][ev] = down end,
+  addKeyCombo = function(l, ev, dev, ref, down, pressed, up)
+    layers[l][ev] = down
+    layerUp[l] = layerUp[l] or {}; layerUp[l][ev] = up
+  end,
   setTopLayer = function(n) table.insert(stack, n) end,
   getLayerStack = function() return stack end,
   getInputActions = function() local r = pending; pending = {}; return r end,
@@ -65,8 +66,9 @@ package.preload["Input.Utils"] = function() return {
 } end
 local function press(ev) table.insert(pending, { action = ev + 10000, deviceId = 7 }) end
 local handler
+local simT = 0   -- reloj simulado (segundos)
 DCS = { getPlayerUnitType = function() return "F-16C_50" end,
-        setUserCallbacks = function(h) handler = h end, getRealTime = function() return os.clock() end }
+        setUserCallbacks = function(h) handler = h end, getRealTime = function() return simT end }
 net = { log = function() end }
 
 -- ===== Panel de radio simulado (misma semantica que Scripts/UI/RadioCommandDialogPanel) =====
@@ -174,6 +176,12 @@ local function sel(i)
   hit().cbs.up(hit(), 960 + 150 * math.cos(a), 551 + 150 * math.sin(a), 1)
 end
 local function center() hit().cbs.up(hit(), 965, 556, 1) end
+local function hover(i)   -- cursor sobre la cuña i (0 = centro)
+  if i == 0 then hit().cbs.move(hit(), 965, 556); return end
+  local a = math.rad(-90 + (i - 1) * 45)
+  hit().cbs.move(hit(), 960 + 150 * math.cos(a), 551 + 150 * math.sin(a))
+end
+local function unhover() hit().cbs.leave(hit()) end
 local function findtxt(prefix) for _, st in ipairs(statics) do if st.text:sub(1, #prefix) == prefix then return st end end end
 
 installPanel("gui")
@@ -262,25 +270,471 @@ assert(window.text:find("Boton asignado: JOY_BTN2", 1, true), "asignado: " .. wi
 local lay = layers["RadialComms"]; assert(lay[101] == 10101 and lay[100] == nil, "capa con un solo boton")
 local fh = io.open(WD .. "Config/RadialCommsJoystick.lua"); local saved = fh:read("*a"); fh:close()
 assert(saved:find("JOY_BTN2") and saved:find("Mi Stick"), saved)
--- pulsar el boton abre y cierra la rueda
+-- === Gesto de un solo boton (spec 001, T5) ===
+local function up(ev) table.insert(pending, { action = ev + 20000, deviceId = 7 }) end
+local function frame(dt) simT = simT + (dt or 0); handler.onSimulationFrame() end
+local function shortClick() press(101); frame(0); up(101); frame(0.3) end   -- pulsacion corta (0,3 s)
 if window.cursor then open() end
 assert(window.cursor == false)
-press(101); handler.onSimulationFrame(); assert(window.cursor == true, "boton abre la rueda")
-press(101); handler.onSimulationFrame(); assert(window.cursor == false, "boton cierra la rueda")
-press(100); handler.onSimulationFrame(); assert(window.cursor == false, "otros botones no hacen nada")
+-- RF-1: larga con la rueda cerrada abre al cumplirse el umbral, sin soltar
+frame(1); press(101); frame(0)
+assert(window.cursor == false, "solo pulsar no abre")
+frame(0.5); assert(window.cursor == false, "a medio umbral no abre")
+frame(0.6); assert(window.cursor == true, "la larga abre la rueda sin soltar")
+frame(2);   assert(window.cursor == true, "seguir pulsando no la cierra (una sola vez)")
+-- RF-6: soltar tras la larga no hace clic (aunque el cursor este sobre COM1)
+hover(1); up(101); frame(0.1)
+assert(window.cursor == true and lab(1):find("COM1", 1, true) and not findtxt("< COM1"), "soltar tras la larga no hace clic")
+-- RF-3: corta con la rueda abierta = clic en la cuña resaltada (4 = Herramientas)
+hover(4); shortClick()
+assert(labidx("Asignar boton"), "la corta entro en Herramientas")
+-- RF-3: corta sobre el centro = atras
+hover(0); shortClick()
+assert(lab(1):find("COM1", 1, true), "la corta sobre el centro vuelve atras")
+-- RF-5: corta sobre una cuña sin opcion, o sin nada resaltado = no hace nada
+hover(5); shortClick()
+assert(window.cursor == true and lab(1):find("COM1", 1, true), "cuña vacia: nada")
+unhover(); shortClick()
+assert(window.cursor == true and lab(1):find("COM1", 1, true), "nada resaltado: nada")
+-- RF-18: una pulsacion de 30 ms se descarta
+hover(4); press(101); frame(0); up(101); frame(0.03)
+assert(lab(1):find("COM1", 1, true), "30 ms no hace clic")
+-- el centro en el menu principal cierra la rueda
+hover(0); shortClick()
+assert(window.cursor == false, "la corta sobre el centro del menu principal cierra")
+-- RF-4: corta con la rueda cerrada = nada
+shortClick()
+assert(window.cursor == false, "corta con la rueda cerrada no hace nada")
+-- RF-2 / RF-17: abierta con el atajo de teclado, la larga la cierra
+open(); assert(window.cursor == true)
+press(101); frame(0); frame(1); assert(window.cursor == false, "la larga cierra la rueda abierta con el teclado")
+up(101); frame(0.1)
+-- no queda resaltado de la apertura anterior: la corta justo tras abrir no hace nada
+open(); hover(4); open(); open()
+assert(window.cursor == true); shortClick()
+assert(window.cursor == true and lab(1):find("COM1", 1, true), "al reabrir no queda nada resaltado")
+open()
+-- otros botones y otros mandos no hacen nada
+press(100); frame(0); frame(2); assert(window.cursor == false, "otros botones no hacen nada")
+table.insert(pending, { action = 10101, deviceId = 8 }); frame(0); frame(2)
+assert(window.cursor == false, "el mismo boton en otro mando no hace nada")
+-- cambio de mision: la pulsacion en curso se descarta (no abre despues)
+press(101); frame(0); frame(0.5); handler.onMissionLoadEnd(); frame(2)
+assert(window.cursor == false, "mision cargada: la pulsacion en curso se descarta")
+up(101); frame(0.1)
+-- parar la simulacion tambien
+press(101); frame(0); frame(0.5); handler.onSimulationStop(); frame(2)
+assert(window.cursor == false, "simulacion detenida: la pulsacion en curso se descarta")
+up(101); frame(0.1); handler.onMissionLoadEnd()
+print("BOTON GESTO OK")
+
+-- === Cursor -> Pointer -> resaltado (spec 001, T6) ===
+local function hv(i) return statics[8 + i].visible end        -- resaltado de la cuña i
+local function hvc() return statics[18].visible end            -- resaltado del centro
+local function onlyHover(n)   -- solo la cuña n (o ninguna) esta resaltada; el centro no
+  for i = 1, 8 do assert((hv(i) == true) == (i == n), "resaltado de la cuña " .. i .. " con el cursor en " .. tostring(n)) end
+  assert(hvc() == false, "el centro no debe estar resaltado")
+end
+fresh(); onlyHover(nil)
+hover(2); onlyHover(2)
+hover(3); onlyHover(3)
+hover(5); onlyHover(nil)           -- cuña sin opcion: no se resalta
+hover(4); onlyHover(4)
+unhover(); onlyHover(nil)          -- el cursor sale de la rueda
+hover(0); assert(hvc() == true, "centro resaltado con el cursor en el centro")
+for i = 1, 8 do assert(hv(i) == false) end
+-- cambio de nivel: el resaltado sigue lo que senala el cursor en el menu nuevo
+hover(4); shortClick()
+assert(labidx("Asignar boton"), "entro en Herramientas")
+onlyHover(nil)                     -- el cursor sigue en 4, que en Herramientas esta vacia
+hover(1); onlyHover(1)
+hover(0); assert(hvc() == true); shortClick()
+assert(lab(1):find("COM1", 1, true), "volvio al menu principal")
+assert(hvc() == true, "tras volver atras el cursor sigue en el centro y el centro sigue resaltado")
+-- al reabrir la rueda no queda nada resaltado
+open(); open()
+onlyHover(nil)
+hover(2); open(); open()
+onlyHover(nil)
+-- el clic de raton sigue ejecutando la misma cuña (RF-16)
+fresh(); sel(4); assert(labidx("Asignar boton"), "clic de raton en Herramientas")
+center(); assert(lab(1):find("COM1", 1, true), "clic de raton en el centro vuelve atras")
+fresh()
+print("CURSOR PUNTERO OK")
+
+-- === Mirada -> Pointer (spec 001, T7) ===
+local cam = { yaw = 90, pitch = 0, hdg = 90, apitch = 0 }   -- camara y avion simulados (grados)
+Export = {
+  LoGetCameraPosition = function()
+    local y, p = math.rad(cam.yaw), math.rad(cam.pitch)   -- x = norte, z = este, y = arriba
+    return { x = { x = math.cos(p) * math.cos(y), y = math.sin(p), z = math.cos(p) * math.sin(y) }, p = { x = 0, y = 0, z = 0 } }
+  end,
+  LoGetSelfData = function() return { Heading = math.rad(cam.hdg), Pitch = math.rad(cam.apitch) } end,
+  LoIsOwnshipExportAllowed = function() return true end,
+}
+local function look(yaw, pitch) cam.yaw, cam.pitch = 90 + yaw, pitch end        -- giro de la cabeza respecto al avion
+local function frames(n) for _ = 1, n do frame(0.1) end end
+local function openAt0() look(0, 0); cam.hdg, cam.apitch = 90, 0; fresh(); frames(3) end   -- abre y toma la referencia
+
+local mod = assert(io.open(WD .. "Scripts/RadialComms/RadialComms.lua", "r")); local modsrc = mod:read("*a"); mod:close()
+assert(not modsrc:find("headDwell", 1, true), "ya no existe la eleccion por tiempo de la mirada")
+
+if HEAD_ON then
+  -- sin mover la cabeza no se resalta nada (la referencia es donde se miraba al abrir)
+  openAt0(); onlyHover(nil)
+  -- RF-8: girar a la derecha 15 grados resalta la cuña 3
+  look(15, 0); frames(15); onlyHover(3)
+  -- RF-9: mantener la mirada no ejecuta nada (ni tras mucho tiempo)
+  frames(60)
+  assert(window.cursor == true and lab(1):find("COM1", 1, true) and not findtxt("< "), "mantener la mirada no ejecuta ninguna cuña")
+  -- arriba 15 grados: cuña 1
+  look(0, 15); frames(15); onlyHover(1)
+  -- RF-21: volver a la zona muerta tras mirar una cuña con opcion resalta el centro
+  look(0, 0); frames(15); assert(hvc() == true, "centro resaltado al volver tras mirar una cuña")
+  for i = 1, 8 do assert(hv(i) == false) end
+  -- RF-22: al abrir, la zona muerta no resalta el centro
+  openAt0(); frames(10); onlyHover(nil)
+  -- dentro de la zona muerta (5 grados) no se resalta nada
+  look(5, 0); frames(15); onlyHover(nil)
+  -- RNF-2: maniobrar con el avion no mueve la mirada (rumbo +30 y cabeceo +20 con la cabeza quieta)
+  look(0, 0); cam.hdg, cam.apitch = 120, 20; cam.yaw, cam.pitch = 120, 20; frames(15)
+  onlyHover(nil)
+  -- RF-7: manda el que cambio en ultimo lugar (cursor/mirada)
+  openAt0(); look(15, 0); frames(15); onlyHover(3)
+  hover(2); onlyHover(2)
+  look(0, 15); frames(15); onlyHover(1)
+  -- RF-3 con la mirada: una pulsacion corta clica la cuña resaltada por la cabeza (4 = Herramientas)
+  openAt0(); unhover(); look(15, -15); frames(15); onlyHover(4)
+  shortClick()
+  assert(labidx("Asignar boton"), "la corta clica la cuña mirada")
+  -- cambio de nivel: seguir mirando la cuña elegida no arma el centro
+  frames(15); assert(hvc() == false, "al entrar en el submenu, mirar la misma cuña no resalta el centro")
+  -- mirar otra cuña (1 = Asignar...) y volver al centro lo arma; la corta vuelve atras
+  look(0, 15); frames(15); onlyHover(1)
+  look(0, 0); frames(15); assert(hvc() == true, "centro armado en el submenu")
+  shortClick()
+  assert(lab(1):find("COM1", 1, true), "volver atras mirando al centro")
+else
+  -- RF-15: con la mirada desactivada solo cuenta el cursor
+  openAt0(); look(15, 0); frames(15); onlyHover(nil)
+  hover(2); onlyHover(2)
+  unhover(); onlyHover(nil)
+end
+-- === Integracion completa (spec 001, T9) ===
+local function longPress() press(101); frame(0); frame(1.0) end          -- mantiene el boton 1 s (la larga actua al llegar)
+local function release() up(101); frame(0.1) end
+if window.cursor then open() end
+look(0, 0); cam.hdg, cam.apitch = 90, 0; unhover()
+assert(window.cursor == false)
+if HEAD_ON then
+  -- Escenario A: solo cabeza y un boton. Abrir (larga) -> entrar en un submenu mirando y pulsando (corta)
+  -- -> volver atras mirando al centro y pulsando (corta) -> cerrar (larga).
+  longPress(); assert(window.cursor == true, "A: la larga abre la rueda")
+  release();   assert(window.cursor == true and lab(1):find("COM1", 1, true), "A: soltar tras la larga no hace clic")
+  frames(3)                                            -- la referencia de la mirada se toma al abrir
+  look(15, -15); frames(15); onlyHover(4)              -- mira Herramientas (abajo a la derecha)
+  shortClick(); assert(labidx("Asignar boton"), "A: la corta entra en Herramientas")
+  look(0, 15); frames(15); onlyHover(1)                -- mira otra cuña del submenu...
+  look(0, 0);  frames(15); assert(hvc() == true, "A: ...y al volver al centro este se resalta")
+  shortClick(); assert(lab(1):find("COM1", 1, true), "A: la corta vuelve atras")
+  look(0, 0); frames(5); assert(hvc() == false, "A: en la raiz, recien vuelto, el centro no queda resaltado (se desarma al cambiar de nivel)")
+  longPress(); assert(window.cursor == false, "A: la larga cierra la rueda")
+  release();   assert(window.cursor == false, "A: soltar tras cerrar no la reabre")
+
+  -- Escenario B: cursor y mirada discrepan; manda el ultimo que cambio y la corta clica ese
+  look(0, 0); longPress(); release(); frames(3)
+  assert(window.cursor == true)
+  look(15, 0); frames(15); onlyHover(3)                -- la mirada senala GROUND CREW
+  hover(4);    onlyHover(4)                            -- el cursor cambia despues: manda el cursor
+  shortClick(); assert(labidx("Asignar boton"), "B: la corta clica lo que senala el cursor (Herramientas), no la mirada")
+  look(15, 15); frames(15); onlyHover(2)               -- ahora cambia la mirada (cuña 2 del submenu): manda la mirada
+  hover(1);    onlyHover(1)                            -- y luego el cursor
+  hover(0); shortClick(); assert(lab(1):find("COM1", 1, true), "B: vuelve atras con el cursor")
+  longPress(); assert(window.cursor == false, "B: la larga cierra la rueda"); release()
+else
+  -- Escenario A con solo cursor (mirada desactivada): mismo recorrido
+  longPress(); assert(window.cursor == true, "A: la larga abre la rueda")
+  release();   assert(window.cursor == true and lab(1):find("COM1", 1, true), "A: soltar tras la larga no hace clic")
+  hover(4); shortClick(); assert(labidx("Asignar boton"), "A: la corta entra en Herramientas")
+  hover(0); shortClick(); assert(lab(1):find("COM1", 1, true), "A: la corta vuelve atras")
+  longPress(); assert(window.cursor == false, "A: la larga cierra la rueda")
+  release();   assert(window.cursor == false)
+end
+print("INTEGRACION OK")
+fresh(); Export = nil
+print("MIRADA PUNTERO OK")
 -- DCS rehace la pila: se repone
 stack = {}; layers = {}
-local t0 = os.clock(); while os.clock() - t0 < 0.01 do end
-DCS.getRealTime = function() return 1e6 end
+simT = simT + 10
 handler.onSimulationFrame()
 assert(layers["RadialComms"] and layers["RadialComms"][101], "capa repuesta")
 -- borrar
 fresh(); sel(4); sel(labidx("Quitar boton"))
 assert(layers["RadialComms"] == nil, "capa borrada")
 print("JOY OK")
+
+-- ===== JoyButton (spec 001, T4): avisa de pulsar Y de soltar =====
+do
+  local J = dofile(WD .. "Scripts/RadialComms/JoyButton.lua")
+  local savePath = WD .. "Config/RadialCommsJoystick_t4.lua"
+  local fh = io.open(savePath, "w"); fh:write('return { device = "Mi Stick {123}", button = "JOY_BTN2" }\n'); fh:close()
+  local logs = {}
+  local j = J.new({ log = function(m) logs[#logs + 1] = m end, savePath = savePath })
+  j.load(); j.reassert()
+  -- la capa registra pulsar (down) Y soltar (up), con codigos distintos
+  assert(layers["RadialComms"] and layers["RadialComms"][101] == 10101, "accion de pulsar")
+  assert(layerUp["RadialComms"][101] == 20101, "accion de soltar registrada")
+  assert(layerUp["RadialComms"][101] ~= layers["RadialComms"][101], "pulsar y soltar son acciones distintas")
+
+  local downs, ups = {}, {}
+  local function onPress(t) downs[#downs + 1] = t end
+  local function onUp(t) ups[#ups + 1] = t end
+  local function poll(t) j.poll(t, onPress, function() end, function() end, onUp) end
+  local function act(code, dev) table.insert(pending, { action = code, deviceId = dev or 7 }) end
+
+  act(10101); poll(5.0)
+  assert(#downs == 1 and downs[1] == 5.0 and #ups == 0, "pulsar avisa con la hora")
+  act(20101); poll(5.4)
+  assert(#downs == 1 and #ups == 1 and ups[1] == 5.4, "soltar avisa con la hora")
+  -- pulsar y soltar en el mismo frame: se respeta el orden
+  act(10101); act(20101); poll(6.0)
+  assert(#downs == 2 and #ups == 2, "pulsar y soltar en el mismo frame")
+  -- RNF-1: el mismo boton en OTRO mando no hace nada (ni pulsar ni soltar)
+  act(10101, 8); act(20101, 8); poll(7.0)
+  assert(#downs == 2 and #ups == 2, "otro mando con el mismo numero de boton: nada")
+  -- otro boton del mismo mando: nada
+  act(10100); act(20100); poll(7.5)
+  assert(#downs == 2 and #ups == 2, "otro boton: nada")
+  -- sin onUp (uso antiguo) no falla
+  act(20101); j.poll(8.0, onPress, function() end, function() end)
+  -- primera accion de soltar: queda en el log (riesgo R1: comprobar que DCS la entrega)
+  local sawUp = false; for _, m in ipairs(logs) do if m:find("soltar", 1, true) then sawUp = true end end
+  assert(sawUp, "se escribe en el log al recibir el primer 'soltar'")
+
+  -- el modo aprender sigue funcionando y la capa nueva tambien lleva 'soltar'
+  local learned
+  j.startLearn(9.0, 12)
+  assert(layers["RadialComms"][100] == 10100 and layers["RadialComms"][101] == 10101, "aprender: vigila los botones")
+  act(10100); j.poll(9.5, onPress, function(d, b) learned = b end, function() end, onUp)
+  assert(learned == "JOY_BTN1", "aprender: asigna el boton pulsado")
+  assert(layerUp["RadialComms"][100] == 20100, "tras aprender, la capa nueva registra 'soltar'")
+  j.clear()
+  os.remove(savePath)
+end
+print("JOY SOLTAR OK")
+
+-- ===== Gesture (spec 001, T1): pulsacion larga / corta / rebote =====
+local Gesture = dofile(WD .. "Scripts/RadialComms/Gesture.lua")
+do
+  local g = Gesture.new({ longSec = 1.0 })
+  -- RF-1: larga con la rueda cerrada -> "toggle" al cumplirse el umbral, sin esperar a soltar
+  g.down(10.0)
+  assert(g.tick(10.5) == nil, "antes del umbral no pasa nada")
+  assert(g.tick(11.0) == "toggle", "al llegar al umbral abre/cierra")
+  assert(g.tick(11.5) == nil, "la larga dispara una sola vez aunque se siga pulsando")
+  assert(g.tick(30.0) == nil, "mantenida mucho tiempo: sigue siendo una sola vez")
+  -- RF-6: soltar tras la larga no da clic (con rueda abierta o cerrada)
+  assert(g.up(31.0, true) == nil, "soltar tras la larga: sin clic")
+  g.down(40.0); assert(g.tick(41.0) == "toggle"); assert(g.up(41.2, false) == nil)
+
+  -- RF-3: corta con la rueda abierta -> clic
+  g.down(50.0); assert(g.up(50.3, true) == "click", "corta con rueda abierta = clic")
+  -- RF-4: corta con la rueda cerrada -> nada
+  g.down(60.0); assert(g.up(60.3, false) == nil, "corta con rueda cerrada = nada")
+
+  -- RF-18: rebote (menos de 50 ms se descarta, 60 ms vale)
+  g.down(70.0); assert(g.up(70.03, true) == nil, "30 ms se descarta")
+  g.down(80.0); assert(g.up(80.06, true) == "click", "60 ms es una pulsacion valida")
+
+  -- suelta justo en el umbral (sin tick previo) cuenta como larga
+  g.down(90.0); assert(g.up(91.0, true) == "toggle", "suelta en el umbral = larga")
+  assert(g.tick(92.0) == nil, "tras soltar no queda nada pendiente")
+
+  -- soltar sin haber pulsado
+  assert(g.up(100.0, true) == nil, "up sin down no hace nada")
+
+  -- una pulsacion nueva sustituye a otra perdida (se perdio el 'soltar')
+  g.down(110.0); g.down(115.0)
+  assert(g.tick(115.5) == nil, "la pulsacion nueva reinicia el tiempo")
+  assert(g.tick(116.0) == "toggle")
+
+  -- reset descarta la pulsacion en curso (cambio de mision/avion)
+  g.down(120.0); g.reset()
+  assert(g.tick(125.0) == nil and g.up(125.1, true) == nil, "reset descarta la pulsacion")
+
+  -- RF-12: umbral configurable
+  local g2 = Gesture.new({ longSec = 0.5 })
+  g2.down(0); assert(g2.tick(0.4) == nil and g2.tick(0.5) == "toggle", "umbral 0,5 s")
+
+  -- RF-13: umbral invalido -> 1 s
+  for _, bad in ipairs({ 0, -1, "x", false }) do
+    local gb = Gesture.new({ longSec = bad })
+    gb.down(0); assert(gb.tick(0.9) == nil and gb.tick(1.0) == "toggle", "umbral invalido (" .. tostring(bad) .. ") usa 1 s")
+  end
+  local gn = Gesture.new({}); gn.down(0); assert(gn.tick(0.9) == nil and gn.tick(1.0) == "toggle", "sin umbral usa 1 s")
+  local gz = Gesture.new(); gz.down(0); assert(gz.tick(1.0) == "toggle", "sin opciones usa 1 s")
+end
+print("GESTURE OK")
+
+-- ===== Pointer (spec 001, T2): sectores de la mirada y arbitro cursor/mirada =====
+local Pointer = dofile(WD .. "Scripts/RadialComms/Pointer.lua")
+do
+  local S = Pointer.sectorFromDelta
+  -- RF-8 / RF-10 / RF-19: zona muerta de 7 grados
+  assert(S(0, 0, 7) == nil and S(0, 6.99, 7) == nil and S(4, 4, 7) == nil, "dentro de la zona muerta: nil")
+  assert(S(0, 7, 7) == 1, "justo en el borde de la zona muerta ya cuenta")
+  -- 1 = arriba, sentido horario (yaw positivo = derecha, pitch positivo = arriba)
+  assert(S(0, 10, 7) == 1,  "arriba")
+  assert(S(10, 10, 7) == 2, "arriba-derecha")
+  assert(S(10, 0, 7) == 3,  "derecha")
+  assert(S(10, -10, 7) == 4, "abajo-derecha")
+  assert(S(0, -10, 7) == 5, "abajo")
+  assert(S(-10, -10, 7) == 6, "abajo-izquierda")
+  assert(S(-10, 0, 7) == 7, "izquierda")
+  assert(S(-10, 10, 7) == 8, "arriba-izquierda")
+  -- limites entre sectores (22,5 grados)
+  local function pol(deg, r) local a = math.rad(deg); return r * math.sin(a), r * math.cos(a) end
+  local x, y = pol(22, 10);  assert(S(x, y, 7) == 1, "22 grados sigue en el sector 1")
+  x, y = pol(23, 10);        assert(S(x, y, 7) == 2, "23 grados ya es el sector 2")
+  x, y = pol(-22, 10);       assert(S(x, y, 7) == 1, "-22 grados sigue en el sector 1")
+  x, y = pol(-23, 10);       assert(S(x, y, 7) == 8, "-23 grados es el sector 8")
+
+  -- el puntero usa 7 grados por defecto (RF-19) y los configurados si son validos
+  local p = Pointer.new({})
+  p.gaze(0, 6); assert(p.current() == nil, "6 grados: dentro de la zona muerta por defecto")
+  p.gaze(0, 8); assert(p.current() == 1, "8 grados: sector 1 con la zona muerta por defecto")
+  local p10 = Pointer.new({ deadzone = 10 })
+  p10.gaze(0, 8); assert(p10.current() == nil, "zona muerta de 10 grados configurada")
+  p10.gaze(0, 11); assert(p10.current() == 1)
+  -- RF-20: zona muerta invalida -> 7
+  for _, bad in ipairs({ 0, -3, "x", false }) do
+    local pb = Pointer.new({ deadzone = bad })
+    pb.gaze(0, 6); assert(pb.current() == nil, "zona muerta invalida (" .. tostring(bad) .. ") usa 7: 6 grados dentro")
+    pb.gaze(0, 8); assert(pb.current() == 1, "zona muerta invalida (" .. tostring(bad) .. ") usa 7: 8 grados fuera")
+  end
+  assert(Pointer.new().current() == nil, "sin opciones ni fuentes: nada resaltado")
+
+  -- RF-7: manda la fuente que cambio en ultimo lugar
+  local a = Pointer.new({})
+  a.mouse(3); assert(a.current() == 3, "solo cursor")
+  a.gaze(0, 10); assert(a.current() == 1, "la mirada cambio despues: manda la mirada")
+  a.mouse(5); assert(a.current() == 5, "el cursor cambio despues: manda el cursor")
+  a.gaze(0, 0); a.gaze(0, 10)
+  assert(a.current() == 1, "la mirada cambio en ultimo lugar")
+  a.mouse(5)  -- el cursor ya estaba en 5: repetir el valor no cuenta como cambio
+  assert(a.current() == 1, "repetir el mismo valor no cuenta como cambio: sigue mandando la mirada")
+  a.mouse(0); assert(a.current() == 0, "el cursor en el centro resalta el centro")
+  -- si la fuente mas reciente no senala nada, se usa la otra
+  -- (puntero sin cuñas con opcion: el centro no se arma, la zona muerta no senala nada; ver T3)
+  local f = Pointer.new({ hasItem = function() return false end })
+  f.mouse(2); f.gaze(0, 10)
+  f.gaze(0, 0); assert(f.current() == 2, "la mirada vuelve a la zona muerta: vale el cursor")
+  f.mouse(nil); assert(f.current() == nil, "ninguna fuente senala nada")
+  f.mouse(4); f.mouse(nil); f.gaze(10, 0); assert(f.current() == 3)
+  f.mouse(nil); f.gaze(0, 0); assert(f.current() == nil)
+
+  -- RF-15: sin llamar a gaze (mirada desactivada) solo cuenta el cursor
+  local c = Pointer.new({})
+  c.mouse(6); assert(c.current() == 6); c.mouse(nil); assert(c.current() == nil, "sin mirada: solo cursor")
+end
+print("POINTER OK")
+
+-- ===== Pointer (spec 001, T3): centro "armado" y reinicio por nivel de menu =====
+do
+  local items = { [1] = true, [2] = true, [3] = true, [4] = true }          -- cuñas con opcion
+  local function has(s) return items[s] == true end
+  local function new() return Pointer.new({ hasItem = has }) end
+
+  -- RF-22: al abrir, la mirada en la zona muerta no resalta el centro
+  local p = new()
+  p.gaze(0, 0); assert(p.current() == nil, "al abrir, el centro no se resalta con la mirada")
+  p.gaze(1, 2);  assert(p.current() == nil, "dentro de la zona muerta sigue sin resaltar")
+
+  -- RF-21: tras mirar una cuña con opcion y volver a la zona muerta, se resalta el centro
+  p.gaze(0, 10); assert(p.current() == 1)
+  p.gaze(0, 0);  assert(p.current() == 0, "tras mirar una cuña, la zona muerta resalta el centro")
+  p.gaze(10, 0); assert(p.current() == 3, "mirar otra cuña la resalta")
+  p.gaze(0, 0);  assert(p.current() == 0, "y volver al centro lo resalta de nuevo")
+
+  -- el centro de la mirada tambien se rige por "el ultimo que cambio"
+  p.mouse(2); assert(p.current() == 2, "el cursor cambio despues")
+  p.gaze(0, 0); assert(p.current() == 2, "la mirada sigue en el centro sin cambiar: manda el cursor")
+  p.mouse(nil); assert(p.current() == 0, "sin cursor vale el centro de la mirada")
+
+  -- sin hasItem, toda cuña tiene opcion
+  local q = Pointer.new({}); q.gaze(0, 10); q.gaze(0, 0)
+  assert(q.current() == 0, "sin hasItem se asume que toda cuña tiene opcion")
+
+  -- mirar una cuña SIN opcion no arma el centro
+  local r = new()
+  r.gaze(-10, -10); assert(r.current() == 6, "el puntero senala la cuña 6 aunque no tenga opcion")
+  r.gaze(0, 0);     assert(r.current() == nil, "una cuña sin opcion no arma el centro")
+
+  -- reset: desarma
+  local s = new()
+  s.gaze(0, 10); s.gaze(0, 0); assert(s.current() == 0)
+  s.reset(); assert(s.current() == nil, "tras reset el centro deja de resaltarse")
+  s.gaze(0, 0); assert(s.current() == nil, "y no se vuelve a resaltar hasta mirar una cuña")
+  s.gaze(0, 10); s.gaze(0, 0); assert(s.current() == 0, "mirando una cuña se arma otra vez")
+
+  -- caso limite: entrar en un submenu con la mirada aun sobre la cuña elegida
+  local t = new()
+  t.gaze(0, 10); assert(t.current() == 1)
+  t.reset()                                   -- se entra en el submenu; la mirada sigue en la cuña 1
+  assert(t.current() == 1, "la mirada sigue señalando la cuña 1 del submenu nuevo")
+  t.gaze(0, 10); t.gaze(0, 10)
+  t.gaze(0, 0); assert(t.current() == nil, "la misma cuña de antes no arma el centro")
+  t.gaze(0, 10); t.gaze(0, 0); assert(t.current() == nil, "volver a la misma cuña tampoco")
+  t.gaze(10, 0); assert(t.current() == 3)
+  t.gaze(0, 0);  assert(t.current() == 0, "mirar OTRA cuña si arma el centro")
+
+  -- reset no toca el cursor
+  local u = new(); u.mouse(4); u.reset()
+  assert(u.current() == 4, "reset no cambia el cursor")
+
+  -- RF-9: el puntero no tiene ninguna operacion que elija una cuña por tiempo
+  local api = {}
+  for k in pairs(p) do api[#api + 1] = k end
+  table.sort(api)
+  assert(table.concat(api, ",") == "current,gaze,mouse,reset", "API del puntero: " .. table.concat(api, ","))
+end
+print("POINTER CENTRO OK")
 print("WEDGE ONLY DYNAMIC TEST OK")
 '''
-lua = LuaRuntime()
-lua.eval("function(src, wd) return assert(loadstring(src))(wd) end")(test, wd)
-print(open(wd+"Logs\\RadialComms.log",encoding="utf-8").read()[-1500:]) if False else None
-shutil.rmtree(wd.rstrip("/"), ignore_errors=True)
+import re
+
+
+# --- el archivo de configuracion real lleva las opciones nuevas (spec 001, T8)
+real_cfg = open(f"{src_root}/Config/RadialCommsConfig.lua", encoding="utf-8").read()
+for key, val in (("longPressSeconds", "1.0"), ("headDeadzone", "7"), ("headSelect", "true")):
+    assert re.search(key + r"\s*=\s*" + re.escape(val) + r"\b", real_cfg), "falta " + key + " = " + val + " en Config/RadialCommsConfig.lua"
+assert "headDwell" not in real_cfg, "Config/RadialCommsConfig.lua no debe llevar headDwell"
+CLAVES_NUEVAS = ("longPressSeconds", "headDeadzone", "headSelect")
+
+
+def run(head_on, antigua=False):
+    # carpeta de escritura temporal con la config de la prueba (seleccion con la cabeza activada o no).
+    # antigua=True: config de una version anterior (sin las claves nuevas y con headDwell): deben valer los
+    # valores por defecto del modulo.
+    wd = tempfile.mkdtemp(prefix="dcs_writedir_") + "/"
+    shutil.copytree(f"{src_root}/Config", wd + "Config")
+    shutil.copytree(f"{src_root}/Scripts", wd + "Scripts")
+    cfgp = wd + "Config/RadialCommsConfig.lua"
+    cfg = open(cfgp, encoding="utf-8").read()
+    if antigua:
+        for key in CLAVES_NUEVAS:
+            cfg = re.sub(r"(?m)^[ \t]*" + key + r"[ \t]*=.*$", "", cfg)
+        cfg = cfg.replace("return {", "return {\n    headDwell = 1.0,", 1)
+    else:
+        cfg = re.sub(r"headSelect\s*=\s*(true|false)", "headSelect = " + ("true" if head_on else "false"), cfg)
+    open(cfgp, "w", encoding="utf-8").write(cfg)
+    lua = LuaRuntime()
+    lua.eval("function(src, wd, headOn) return assert(loadstring(src))(wd, headOn) end")(test, wd, head_on)
+    shutil.rmtree(wd.rstrip("/"), ignore_errors=True)
+
+
+for mode in (True, False):
+    print("--- mirada " + ("activada" if mode else "desactivada") + " ---")
+    run(mode)
+print("--- config antigua (valores por defecto: mirada activada) ---")
+run(True, antigua=True)

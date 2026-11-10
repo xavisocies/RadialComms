@@ -39,10 +39,10 @@ function M.start()
         closeAfterAction = true, -- cerrar la rueda tras ejecutar una accion
         runProbe = true,         -- volcar al log que partes del menu nativo son accesibles
         headProbe = true,        -- registrar la orientacion de la camara/cabeza mientras la rueda esta abierta
+        longPressSeconds = 1.0,  -- segundos manteniendo el boton de joystick para abrir/cerrar la rueda
         headProbeInterval = 0.5, -- segundos entre muestras
         headProbeSamples = 60,   -- maximo de muestras por apertura (60 x 0.5 s = 30 s)
-        headSelect = false,      -- (EXPERIMENTAL, sin probar) elegir cuñas con la cabeza (VR / TrackIR): mirar un sector y mantener
-        headDwell = 1.0,         -- segundos mirando un sector para elegirlo
+        headSelect = true,       -- resaltar cuñas con la cabeza (VR / TrackIR); se elige con el boton
         headDeadzone = 7,        -- grados de giro desde la posicion inicial antes de resaltar un sector
     }
 
@@ -131,6 +131,9 @@ function M.start()
     local probeDone = false
     local statusMsg = nil   -- aviso corto que se muestra en la barra de titulo de la rueda
     local joy = nil         -- boton de joystick (JoyButton.lua)
+    local gesture = nil     -- pulsacion larga/corta de ese boton (Gesture.lua)
+    local PointerMod = nil  -- modulo Pointer.lua (cursor + mirada)
+    local pointer = nil     -- puntero de la rueda abierta: decide que cuña esta resaltada
     local toggleWheel       -- abre/cierra la rueda (definida mas abajo)
     local render, setStatus -- se definen mas abajo (declaradas aqui para que las vea runAction)
     local wedge = nil       -- widgets del estilo de cuñas (nil si no se pudieron crear)
@@ -221,7 +224,7 @@ function M.start()
     local headSamples = 0
     local headStructLogged = false
     -- Seleccion con la cabeza: ref = orientacion al abrir la rueda (relativa al avion)
-    local headSel = { ref = nil, dy = 0, dp = 0, sec = nil, since = 0, armed = true, lastT = 0 }
+    local headSel = { ref = nil, dy = 0, dp = 0, lastT = 0 }
 
     local function nowSeconds()
         local ok, t = pcall(function() return DCS.getRealTime() end)
@@ -237,17 +240,10 @@ function M.start()
         return a
     end
 
-    -- Sector 1-8 (1 arriba, sentido horario) segun la desviacion en grados.
-    -- Devuelve nil dentro de la zona muerta.
+    -- Sector 1-8 (1 arriba, sentido horario) segun la desviacion en grados; nil dentro de la zona
+    -- muerta. La logica esta en Pointer.lua (aqui solo la usa la sonda de cabeza).
     local function sectorFromDelta(dYaw, dPitch, deadzone)
-        if math.sqrt(dYaw * dYaw + dPitch * dPitch) < deadzone then
-            return nil
-        end
-        local deg = math.deg(math.atan2(dYaw, dPitch)) -- 0 = arriba, positivo = derecha
-        if deg < 0 then
-            deg = deg + 360
-        end
-        return math.floor((deg + 22.5) / 45) % 8 + 1
+        return PointerMod and PointerMod.sectorFromDelta(dYaw, dPitch, deadzone) or nil
     end
 
     local function sampleHead()
@@ -871,7 +867,7 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
                 wedge.centerLabel:setBounds(cx0, math.floor(cy0 - 14), 92, 28)
                 wedge.centerSub:setText("")
             end
-            updateHover(nil)
+            updateHover(pointer and pointer.current() or nil)
             return
         end
     end
@@ -1005,6 +1001,7 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
             node.badge = { name = badgeName, hz = tunedHz0 }
         end
         table.insert(stack, node)
+        if pointer then pointer.reset() end
         statusMsg = nil
         -- Aviso: con la comunicacion facil desactivada el mensaje sale por la frecuencia SINTONIZADA
         local tunedHz = tonumber(string.match(info, "freqHz=(%d+)"))
@@ -1028,6 +1025,7 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
 
         if item.items then
             table.insert(stack, item)
+            if pointer then pointer.reset() end
             statusMsg = nil
             render()
         elseif item.radio then
@@ -1044,6 +1042,7 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         log("CLICK centro (" .. (#stack > 1 and "atras" or "cerrar") .. ")")
         if #stack > 1 then
             table.remove(stack)
+            if pointer then pointer.reset() end
             statusMsg = nil
             render()
         else
@@ -1111,6 +1110,17 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         return math.floor(deg / 45) + 1
     end
 
+    -- El cursor cambio de sector: se lo dice al puntero (que decide que se resalta) y repinta.
+    local function setMouseSector(sec)
+        if pointer then
+            pointer.mouse(sec)
+            local cur = pointer.current()
+            if cur ~= hoverSector then updateHover(cur) end
+        elseif sec ~= hoverSector then
+            updateHover(sec)
+        end
+    end
+
     local function buildWedges(parent)
         local dir = lfs.writedir() .. "Scripts\\RadialComms\\img\\"
         local w = { normal = {}, hover = {}, label = {}, cur = {}, curCenter = "blue" }
@@ -1161,10 +1171,9 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
                 logged = logged + 1
                 log(string.format("WEDGE raton move x=%s y=%s -> sector %s", tostring(x), tostring(y), tostring(sectorAt(x, y))))
             end
-            local sec = sectorAt(x, y)
-            if sec ~= hoverSector then updateHover(sec) end
+            setMouseSector(sectorAt(x, y))
         end)
-        hit:addMouseLeaveCallback(function() updateHover(nil) end)
+        hit:addMouseLeaveCallback(function() setMouseSector(nil) end)
         hit:addMouseUpCallback(function(self, x, y)
             local sec = sectorAt(x, y)
             log(string.format("WEDGE raton up x=%s y=%s -> sector %s", tostring(x), tostring(y), tostring(sec)))
@@ -1221,7 +1230,7 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         headRef = nil
         headLastT = nil
         headSamples = 0
-        headSel = { ref = nil, dy = 0, dp = 0, sec = nil, since = 0, armed = true, lastT = 0 }
+        headSel = { ref = nil, dy = 0, dp = 0, lastT = 0 }
         statusMsg = nil
         if not wedge then
             log("No se puede abrir: la rueda no se creo (ver ERROR arriba)")
@@ -1230,7 +1239,16 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         window:setVisible(true)
         panel:setVisible(true)
         window:setHasCursor(true)
+        -- puntero nuevo en cada apertura: no queda nada resaltado de la anterior (una pulsacion corta lo clicaria)
+        pointer = PointerMod and PointerMod.new({
+            deadzone = config.headDeadzone,
+            hasItem = function(sec)
+                local items = currentNode().items
+                return items ~= nil and items[sec] ~= nil
+            end,
+        }) or nil
         applyStyle()
+        updateHover(nil)
         isHidden = false
 
         if config.runProbe and not probeDone then
@@ -1251,10 +1269,9 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         isHidden = true
     end
 
-    -- Seleccion con la cabeza: la orientacion de la camara (relativa al avion, para que las
-    -- maniobras no cuenten) se compara con la que tenia al abrir la rueda. Pasar de la zona muerta
-    -- resalta el sector; mantener la mirada headDwell segundos lo elige. Despues hay que volver
-    -- a la zona muerta antes de poder elegir otro (evita elegir el opuesto al volver al centro).
+    -- Mirada: la orientacion de la camara (relativa al avion, para que las maniobras no cuenten) se
+    -- compara con la que tenia al abrir la rueda y se le pasa al puntero, que resalta la cuña (o el
+    -- centro). La mirada SOLO resalta: la cuña se ejecuta con el boton (o el raton), nunca por tiempo.
     local function headAngles()
         if type(Export) ~= "table" or type(Export.LoGetCameraPosition) ~= "function" then return nil end
         local ok, cam = pcall(Export.LoGetCameraPosition)
@@ -1289,22 +1306,10 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         headSel.dy = headSel.dy + k * (wrap180(yaw - headSel.ref.yaw) - headSel.dy)
         headSel.dp = headSel.dp + k * ((pitch - headSel.ref.pitch) - headSel.dp)
 
-        local sec = sectorFromDelta(headSel.dy, headSel.dp, config.headDeadzone)
-        if sec ~= headSel.sec then
-            headSel.sec = sec
-            headSel.since = t
-            updateHover(sec)
-        end
-        if sec == nil then
-            headSel.armed = true
-        elseif headSel.armed and (t - headSel.since) >= config.headDwell then
-            local node = currentNode()
-            if node.items and node.items[sec] then
-                headSel.armed = false
-                log(string.format("HEADSEL: sector %d elegido (dYaw=%.1f dPitch=%.1f)", sec, headSel.dy, headSel.dp))
-                onSelect(sec)
-            end
-        end
+        if not pointer then return end
+        pointer.gaze(headSel.dy, headSel.dp)
+        local cur = pointer.current()
+        if cur ~= hoverSector then updateHover(cur) end
     end
 
     local function createWindow()
@@ -1333,6 +1338,15 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         end
         window:addHotKeyCallback(config.hotkey, toggleWheel)
 
+        local okp, PM = pcall(function()
+            return dofile(lfs.writedir() .. "Scripts/RadialComms/Pointer.lua")
+        end)
+        if okp and PM then
+            PointerMod = PM
+        else
+            log("No se pudo cargar Pointer.lua (el cursor resaltara sin puntero): " .. tostring(PM))
+        end
+
         if config.joystickButton ~= false then
             local okj, J = pcall(function()
                 return dofile(lfs.writedir() .. "Scripts/RadialComms/JoyButton.lua")
@@ -1343,12 +1357,36 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
             else
                 log("JOY: no se pudo cargar JoyButton.lua: " .. tostring(J))
             end
+
+            local okg, G = pcall(function()
+                return dofile(lfs.writedir() .. "Scripts/RadialComms/Gesture.lua")
+            end)
+            if okg and G then
+                gesture = G.new({ longSec = config.longPressSeconds })
+            else
+                log("JOY: no se pudo cargar Gesture.lua (el boton solo abrira/cerrara): " .. tostring(G))
+            end
         end
 
         centerWindow()
         window:setVisible(true)
         hide()
         log("Ventana creada. Hotkey: " .. tostring(config.hotkey))
+    end
+
+    -- Resultado del gesto del boton: "toggle" abre/cierra la rueda (la misma funcion que el atajo de
+    -- teclado) y "click" ejecuta lo resaltado (0 = centro: atras o cerrar; 1-8 = cuña; nada = no hace nada).
+    local function handleGesture(act)
+        if act == "toggle" then
+            if toggleWheel then toggleWheel() end
+        elseif act == "click" then
+            local sec = pointer and pointer.current() or hoverSector
+            if sec == 0 then
+                onCenter()
+            elseif sec then
+                onSelect(sec)
+            end
+        end
     end
 
     ----------------------------------------------------------------------
@@ -1366,13 +1404,22 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         end
 
         if joy then
-            local okp, errp = pcall(joy.poll, DCS.getRealTime(),
-                function() if toggleWheel then toggleWheel() end end,
-                function(dev, btn)
-                    log("JOY: asignado " .. dev .. " / " .. btn)
-                    setStatus("Boton asignado: " .. btn)
-                end,
-                function() setStatus("Sin pulsacion: no se asigno ningun boton") end)
+            local now = DCS.getRealTime()
+            local okp, errp = pcall(function()
+                joy.poll(now,
+                    function(t) -- boton pulsado
+                        if gesture then gesture.down(t) elseif toggleWheel then toggleWheel() end
+                    end,
+                    function(dev, btn)
+                        log("JOY: asignado " .. dev .. " / " .. btn)
+                        setStatus("Boton asignado: " .. btn)
+                    end,
+                    function() setStatus("Sin pulsacion: no se asigno ningun boton") end,
+                    function(t) -- boton soltado
+                        if gesture then handleGesture(gesture.up(t, not isHidden)) end
+                    end)
+                if gesture then handleGesture(gesture.tick(now)) end
+            end)
             if not okp then
                 log("JOY: error en poll (desactivado): " .. tostring(errp))
                 joy = nil
@@ -1400,19 +1447,21 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         inMission = true
         radioState = nil -- el panel de radio se recrea con cada mision: volver a detectarlo
         if joy then pcall(joy.reassert) end
+        if gesture then gesture.reset() end
         log("Mision cargada")
     end
 
     function M.onSimulationStop()
         inMission = false
         radioState = nil
+        if gesture then gesture.reset() end
         if window then
             hide()
         end
         log("Simulacion detenida")
     end
 
-    log("RadialComms v0.9.0 iniciado")
+    log("RadialComms v0.10.0 iniciado")
 end
 
 -- Si DCS llama antes de start(), los callbacks no hacen nada.

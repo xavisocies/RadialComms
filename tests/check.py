@@ -7,6 +7,8 @@ files = [
     "Scripts/Hooks/RadialComms-hook.lua",
     "Scripts/RadialComms/RadialComms.lua",
     "Scripts/RadialComms/JoyButton.lua",
+    "Scripts/RadialComms/Gesture.lua",
+    "Scripts/RadialComms/Pointer.lua",
     "Config/RadialCommsConfig.lua",
     "Config/RadialCommsMenu.lua",
 ]
