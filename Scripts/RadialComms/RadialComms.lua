@@ -37,8 +37,8 @@ function M.start()
     local defaultConfig = {
         hotkey = "Ctrl+Shift+q", -- abrir/cerrar la rueda (nombres de tecla: dxgui\bind\KeyNames.txt)
         closeAfterAction = true, -- cerrar la rueda tras ejecutar una accion
-        runProbe = true,         -- volcar al log que partes del menu nativo son accesibles
-        headProbe = true,        -- registrar la orientacion de la camara/cabeza mientras la rueda esta abierta
+        runProbe = false,        -- (diagnostico) volcar al log que partes del menu nativo son accesibles
+        headProbe = false,       -- (diagnostico) registrar la orientacion de la camara/cabeza mientras la rueda esta abierta
         longPressSeconds = 1.0,  -- segundos manteniendo el boton de joystick para abrir/cerrar la rueda
         headProbeInterval = 0.5, -- segundos entre muestras
         headProbeSamples = 60,   -- maximo de muestras por apertura (60 x 0.5 s = 30 s)
@@ -1529,7 +1529,7 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         log("Simulacion detenida")
     end
 
-    log("RadialComms v0.11.0 iniciado")
+    log("RadialComms v0.11.1 iniciado")
 end
 
 -- Si DCS llama antes de start(), los callbacks no hacen nada.

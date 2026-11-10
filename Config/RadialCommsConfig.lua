@@ -19,15 +19,14 @@ return {
     -- Cerrar la rueda automaticamente tras ejecutar una accion
     closeAfterAction = true,
 
-    -- Volcar al log (Logs\RadialComms.log) que partes del menu de radio nativo
-    -- son accesibles desde un Hook. Util mientras se desarrolla la v0.2.
-    runProbe = true,
+    -- DIAGNOSTICO (apagado por defecto). Ponlo en true solo si algo falla y hay que investigar:
+    -- vuelca al log (Logs\RadialComms.log) que partes del menu de radio nativo son accesibles.
+    runProbe = false,
 
-    -- Sonda de cabeza (VR): mientras la rueda esta abierta, registra en el log la
-    -- orientacion de la camara respecto a la que tenia al abrir, y que sector se
-    -- seleccionaria con esa mirada. Sirve para comprobar si el movimiento de cabeza
-    -- llega al Hook. No cambia el comportamiento de la rueda.
-    headProbe = true,
+    -- DIAGNOSTICO (apagado por defecto). Sonda de cabeza: mientras la rueda esta abierta, registra
+    -- en el log la orientacion de la camara respecto a la que tenia al abrir. Sirve para comprobar
+    -- si el movimiento de cabeza llega al mod. No cambia el comportamiento de la rueda.
+    headProbe = false,
     headProbeInterval = 0.5, -- segundos entre muestras
     headProbeSamples = 60,   -- maximo de muestras por apertura (60 x 0.5 s = 30 s)
 
