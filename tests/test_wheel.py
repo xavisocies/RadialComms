@@ -5,7 +5,7 @@ import os
 src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 test = r'''
-local WD, HEAD_ON = ...
+local WD, HEAD_ON, MARK_ON, MARK_SCALE = ...
 local statics = {}
 local hotkeys, buttons, window = {}, {}, nil
 local calls = {}
@@ -170,7 +170,15 @@ local function balanced(msg)
 end
 local function fresh() if window.cursor then open() end; open() end
 local hit = function() return statics[#statics] end
-local function lab(i) return statics[18 + i].text end
+local function markKind(st)   -- "dot", "seg" o nil
+  local ok, f = pcall(function() return st.skin.skinData.states.released[1].picture.file end)
+  if not ok or type(f) ~= "string" then return nil end
+  if f:find("gaze_dot", 1, true) then return "dot" end
+  if f:find("gaze_seg", 1, true) then return "seg" end
+  return nil
+end
+local function nmark() local n = 0; for _, st in ipairs(statics) do if markKind(st) then n = n + 1 end end; return n end
+local function lab(i) return statics[18 + nmark() + i].text end
 local function sel(i)
   local a = math.rad(-90 + (i - 1) * 45)
   hit().cbs.up(hit(), 960 + 150 * math.cos(a), 551 + 150 * math.sin(a), 1)
@@ -461,6 +469,92 @@ else
   release();   assert(window.cursor == false)
 end
 print("INTEGRACION OK")
+
+-- === Marca de la mirada: punto + linea (spec 002, T4-T8) ===
+local R_OUT = 204                                   -- borde de la rueda (px)
+local dotW, segW = nil, {}
+for idx, st in ipairs(statics) do
+  local k = markKind(st)
+  if k == "dot" then assert(not dotW, "un solo punto"); dotW = st; dotW.idx = idx
+  elseif k == "seg" then segW[#segW + 1] = st; st.idx = idx end
+end
+assert(dotW, "existe el widget del punto")
+assert(#segW >= 40, "existen los puntitos de la linea: " .. #segW)
+-- RF-9: por encima de cuñas, resaltados y centro (1-18) y por debajo de los textos
+for _, st in ipairs(segW) do assert(st.idx > 18 and st.idx <= 18 + nmark(), "puntito entre el centro y los textos") end
+assert(dotW.idx > 18 and dotW.idx <= 18 + nmark(), "punto entre el centro y los textos")
+for _, st in ipairs(segW) do assert(dotW.idx > st.idx, "el punto va encima de la linea") end
+assert(lab(1) ~= nil, "los textos siguen localizables")
+local function pos(st) return st.bounds[1] + st.bounds[3] / 2 - 220, st.bounds[2] + st.bounds[4] / 2 - 242 end
+local function segsOn() local t = {}; for _, st in ipairs(segW) do if st.visible then t[#t + 1] = st end end; return t end
+local function noMark(msg) assert(dotW.visible == false and #segsOn() == 0, msg) end
+local function dotAt(x, y, tol, msg)
+  assert(dotW.visible == true, msg .. ": punto visible")
+  local px, py = pos(dotW)
+  assert(math.abs(px - x) <= tol and math.abs(py - y) <= tol, msg .. string.format(": punto en (%.1f, %.1f), esperado (%.1f, %.1f)", px, py, x, y))
+end
+local full = math.min(15, MARK_SCALE) / MARK_SCALE * R_OUT       -- distancia del punto mirando 15 grados
+-- con la rueda cerrada, todo oculto (RF-12)
+if window.cursor then open() end
+noMark("rueda cerrada")
+
+if HEAD_ON and MARK_ON then
+  -- RF-7: al abrir, punto en el centro y sin linea
+  openAt0(); dotAt(0, 0, 1, "al abrir"); assert(#segsOn() == 0, "al abrir no hay linea")
+  -- RF-1..RF-5: mirar 15 grados a la derecha
+  look(15, 0); frames(15); dotAt(full, 0, 1, "15 grados a la derecha")
+  local on = segsOn(); assert(#on > 0, "fuera de la zona muerta hay linea")
+  for _, st in ipairs(on) do
+    local x, y = pos(st)
+    assert(x > 0 and x <= full + 1 and math.abs(y) <= 1, "puntito entre el centro y el punto")
+  end
+  -- arriba y diagonal: direccion correcta (arriba = y negativa)
+  look(0, 15); frames(15); dotAt(0, -full, 1, "15 grados arriba")
+  look(-15, -15); frames(15); local dx, dy = pos(dotW); assert(dx < -10 and dy > 10, "diagonal abajo-izquierda")
+  -- RF-6: dentro de la zona muerta, punto si y linea no
+  look(5, 0); frames(15); dotAt(5 / MARK_SCALE * R_OUT, 0, 1, "5 grados"); assert(#segsOn() == 0, "en la zona muerta no hay linea")
+  look(0, 0); frames(15); dotAt(0, 0, 1, "de vuelta al centro"); assert(#segsOn() == 0)
+  -- RF-14: el cursor no mueve ni oculta la marca
+  hover(2); dotAt(0, 0, 1, "el cursor no mueve el punto"); assert(#segsOn() == 0, "el cursor no dibuja linea")
+  -- RF-10: con el cursor mandando la cuña resaltada, la marca sigue a la cabeza
+  look(0, 15); frames(15); onlyHover(1)
+  hover(3); onlyHover(3); dotAt(0, -full, 1, "manda el cursor, la marca sigue a la cabeza"); assert(#segsOn() > 0)
+  unhover()
+  -- RF-13: al cambiar de nivel la marca sigue segun la cabeza
+  openAt0(); look(15, -15); frames(15); onlyHover(4); shortClick()
+  assert(labidx("Asignar boton"), "entro en Herramientas")
+  frames(2); dx, dy = pos(dotW); assert(dotW.visible and dx > 10 and dy > 10 and #segsOn() > 0, "en el submenu la marca sigue donde mira la cabeza")
+  look(0, 15); frames(15); look(0, 0); frames(15); shortClick()
+  assert(lab(1):find("COM1", 1, true), "volvio atras"); frames(2); dotAt(0, 0, 1, "tras volver atras")
+  -- RF-11 (T6): sin limite de muestreo y suavizado segun el tiempo, no segun los frames
+  openAt0(); look(10, 0); frame(0.01)
+  dx = pos(dotW); assert(dx > 0, "el punto ya se mueve en el primer frame (sin esperar 0,05 s)")
+  openAt0(); look(10, 0); for _ = 1, 30 do frame(0.01) end; local x1 = pos(dotW)
+  openAt0(); look(10, 0); for _ = 1, 3 do frame(0.1) end;   local x2 = pos(dotW)
+  local target = 10 / MARK_SCALE * R_OUT
+  assert(math.abs(x1 - x2) <= 1.5, string.format("mismo avance en 0,3 s con frames de 0,01 y de 0,1 s: %.1f / %.1f", x1, x2))
+  assert(x1 > target * 0.5 and x1 < target - 2, "a los 0,3 s el suavizado aun no ha terminado: " .. x1)
+  -- RF-12 (T7): cerrar oculta todo (teclado, pulsacion larga y centro)
+  openAt0(); look(15, 0); frames(15); assert(dotW.visible and #segsOn() > 0)
+  open(); noMark("cerrar con el teclado")
+  openAt0(); look(15, 0); frames(15); press(101); frame(0); frame(1.0); up(101); frame(0.1)
+  assert(window.cursor == false); noMark("cerrar con la pulsacion larga")
+  openAt0(); look(15, 0); frames(15); center(); assert(window.cursor == false); noMark("cerrar con el centro")
+  -- al reabrir no queda la linea de antes
+  look(0, 0); fresh(); assert(#segsOn() == 0, "al reabrir no queda linea"); frames(3); dotAt(0, 0, 1, "al reabrir")
+else
+  -- RF-19 / mirada desactivada: nunca hay marca; lo demas igual
+  openAt0(); noMark("al abrir, sin marca")
+  look(15, 0); frames(15); noMark("mirando, sin marca")
+  hover(2); onlyHover(2); noMark("con el cursor, sin marca")
+  unhover()
+  if HEAD_ON then look(0, 0); frames(15); look(15, 0); frames(15); onlyHover(3) end   -- la mirada sigue resaltando
+  open(); noMark("cerrada, sin marca")
+end
+-- RF-15: el clic de raton y la pulsacion corta ejecutan lo mismo que antes
+look(0, 0); fresh(); sel(4); assert(labidx("Asignar boton"), "clic de raton igual que antes")
+hover(0); shortClick(); assert(lab(1):find("COM1", 1, true), "pulsacion corta igual que antes")
+print("MARCA MIRADA OK")
 fresh(); Export = nil
 print("MIRADA PUNTERO OK")
 -- DCS rehace la pila: se repone
@@ -699,6 +793,75 @@ do
   assert(table.concat(api, ",") == "current,gaze,mouse,reset", "API del puntero: " .. table.concat(api, ","))
 end
 print("POINTER CENTRO OK")
+
+-- ===== GazeMark (spec 002, T1): posicion del punto y si hay linea =====
+local GazeMark = dofile(WD .. "Scripts/RadialComms/GazeMark.lua")
+do
+  local function near(a, b) return math.abs(a - b) < 1e-6 end
+  local m = GazeMark.new({ scale = 15, deadzone = 7, radius = 220 })
+  -- giro 0: punto en el centro, sin linea
+  local x, y, line = m.compute(0, 0)
+  assert(x == 0 and y == 0 and line == false, "giro 0: centro y sin linea")
+  -- direcciones (en pantalla, arriba = y negativa)
+  x, y = m.compute(0, 7.5);   assert(near(x, 0) and near(y, -110), "arriba, mitad del radio")
+  x, y = m.compute(7.5, 0);   assert(near(x, 110) and near(y, 0), "derecha, mitad del radio")
+  x, y = m.compute(0, -7.5);  assert(near(x, 0) and near(y, 110), "abajo")
+  x, y = m.compute(-7.5, 0);  assert(near(x, -110) and near(y, 0), "izquierda")
+  x, y = m.compute(3, 4);     assert(near(x, 3 / 15 * 220) and near(y, -4 / 15 * 220), "diagonal proporcional (giro 5)")
+  x, y = m.compute(-3, -4);   assert(x < 0 and y > 0, "diagonal abajo-izquierda")
+  -- RF-3: al llegar a la escala, en el borde
+  x, y = m.compute(15, 0);    assert(near(x, 220) and near(y, 0), "15 grados: en el borde")
+  -- RF-4: mas alla de la escala no pasa del borde
+  x, y = m.compute(40, 0);    assert(near(x, 220) and near(y, 0), "40 grados: sigue en el borde")
+  x, y = m.compute(30, 40);   assert(near(math.sqrt(x * x + y * y), 220), "diagonal grande: en el borde")
+  assert(near(x, 220 * 0.6) and near(y, -220 * 0.8), "diagonal grande: conserva la direccion")
+  -- RF-5 / RF-6: linea solo con giro >= zona muerta
+  local _, _, l1 = m.compute(0, 6.9); assert(l1 == false, "6,9 grados: sin linea")
+  local _, _, l2 = m.compute(0, 7);   assert(l2 == true, "7 grados: con linea")
+  local _, _, l3 = m.compute(5, 5);   assert(l3 == true, "diagonal de 7,07 grados: con linea")
+  local _, _, l4 = m.compute(4, 4);   assert(l4 == false, "diagonal de 5,66 grados: sin linea")
+  -- RF-18: escala invalida -> 15; zona muerta invalida -> 7
+  for _, bad in ipairs({ 0, -5, "x", false }) do
+    local mb = GazeMark.new({ scale = bad, deadzone = bad, radius = 220 })
+    local bx = mb.compute(7.5, 0); assert(near(bx, 110), "escala invalida (" .. tostring(bad) .. ") usa 15")
+    local _, _, a = mb.compute(0, 6.9); local _, _, b = mb.compute(0, 7)
+    assert(a == false and b == true, "zona muerta invalida (" .. tostring(bad) .. ") usa 7")
+  end
+  local md = GazeMark.new({ radius = 100 })
+  x = md.compute(15, 0); assert(near(x, 100), "sin escala usa 15; radio configurable")
+  -- escala configurable
+  local m30 = GazeMark.new({ scale = 30, radius = 220 })
+  x = m30.compute(15, 0); assert(near(x, 110), "escala 30: 15 grados es la mitad del radio")
+end
+print("GAZEMARK OK")
+
+-- ===== GazeMark (spec 002, T2): puntitos de la linea =====
+do
+  local function near(a, b) return math.abs(a - b) < 1e-6 end
+  -- punto en el centro: sin puntitos
+  assert(#GazeMark.segments(0, 0, 50, 4) == 0, "punto en el centro: lista vacia")
+  -- hacia la derecha, punto a 100 px: puntitos cada 4 px en linea recta, sin pasarse del punto
+  local seg = GazeMark.segments(100, 0, 50, 4)
+  assert(#seg > 0 and #seg <= 50, "hay puntitos y no mas de n")
+  for i, q in ipairs(seg) do
+    assert(near(q.y, 0) and near(q.x, 4 * i), "puntito " .. i .. " a " .. (4 * i) .. " px en la recta")
+    assert(q.x <= 100, "ningun puntito mas lejos que el punto")
+  end
+  assert(seg[#seg].x > 100 - 8, "la linea llega hasta cerca del punto")
+  -- en diagonal: todos sobre la recta y dentro
+  seg = GazeMark.segments(-60, 80, 50, 4)          -- distancia 100
+  for i, q in ipairs(seg) do
+    local d = math.sqrt(q.x * q.x + q.y * q.y)
+    assert(near(d, 4 * i) and d <= 100, "diagonal: distancia del puntito " .. i)
+    assert(near(q.x / d, -0.6) and near(q.y / d, 0.8), "diagonal: misma direccion que el punto")
+  end
+  -- nunca mas de n
+  seg = GazeMark.segments(204, 0, 10, 4)
+  assert(#seg == 10, "tope de n puntitos")
+  -- punto muy cerca del centro: ninguno
+  assert(#GazeMark.segments(3, 0, 50, 4) == 0, "punto a 3 px: no cabe ningun puntito")
+end
+print("GAZEMARK LINEA OK")
 print("WEDGE ONLY DYNAMIC TEST OK")
 '''
 import re
@@ -706,14 +869,22 @@ import re
 
 # --- el archivo de configuracion real lleva las opciones nuevas (spec 001, T8)
 real_cfg = open(f"{src_root}/Config/RadialCommsConfig.lua", encoding="utf-8").read()
-for key, val in (("longPressSeconds", "1.0"), ("headDeadzone", "7"), ("headSelect", "true")):
+for key, val in (("longPressSeconds", "1.0"), ("headDeadzone", "7"), ("headSelect", "true"), ("headMark", "true"), ("headMarkScale", "15")):
     assert re.search(key + r"\s*=\s*" + re.escape(val) + r"\b", real_cfg), "falta " + key + " = " + val + " en Config/RadialCommsConfig.lua"
 assert "headDwell" not in real_cfg, "Config/RadialCommsConfig.lua no debe llevar headDwell"
-CLAVES_NUEVAS = ("longPressSeconds", "headDeadzone", "headSelect")
+CLAVES_NUEVAS = ("longPressSeconds", "headDeadzone", "headSelect", "headMark", "headMarkScale")
 
 
-def run(head_on, antigua=False):
-    # carpeta de escritura temporal con la config de la prueba (seleccion con la cabeza activada o no).
+def setkey(cfg, key, val):
+    # cambia el valor de una clave de la config, o la añade si no esta
+    pat = r"(?m)^([ \t]*)" + key + r"[ \t]*=[ \t]*[^,\n]*"
+    if re.search(pat, cfg):
+        return re.sub(pat, lambda m: m.group(1) + key + " = " + val, cfg)
+    return cfg.replace("return {", "return {\n    " + key + " = " + val + ",", 1)
+
+
+def run(head_on, antigua=False, mark=True, scale=15):
+    # carpeta de escritura temporal con la config de la prueba (mirada y marca activadas o no).
     # antigua=True: config de una version anterior (sin las claves nuevas y con headDwell): deben valer los
     # valores por defecto del modulo.
     wd = tempfile.mkdtemp(prefix="dcs_writedir_") + "/"
@@ -726,15 +897,21 @@ def run(head_on, antigua=False):
             cfg = re.sub(r"(?m)^[ \t]*" + key + r"[ \t]*=.*$", "", cfg)
         cfg = cfg.replace("return {", "return {\n    headDwell = 1.0,", 1)
     else:
-        cfg = re.sub(r"headSelect\s*=\s*(true|false)", "headSelect = " + ("true" if head_on else "false"), cfg)
+        cfg = setkey(cfg, "headSelect", "true" if head_on else "false")
+        cfg = setkey(cfg, "headMark", "true" if mark else "false")
+        cfg = setkey(cfg, "headMarkScale", str(scale))
     open(cfgp, "w", encoding="utf-8").write(cfg)
     lua = LuaRuntime()
-    lua.eval("function(src, wd, headOn) return assert(loadstring(src))(wd, headOn) end")(test, wd, head_on)
+    lua.eval("function(src, wd, headOn, markOn, scale) return assert(loadstring(src))(wd, headOn, markOn, scale) end")(test, wd, head_on, mark, scale)
     shutil.rmtree(wd.rstrip("/"), ignore_errors=True)
 
 
 for mode in (True, False):
     print("--- mirada " + ("activada" if mode else "desactivada") + " ---")
     run(mode)
-print("--- config antigua (valores por defecto: mirada activada) ---")
+print("--- config antigua (valores por defecto: mirada y marca activadas) ---")
 run(True, antigua=True)
+print("--- marca de la mirada desactivada (headMark = false) ---")
+run(True, mark=False)
+print("--- escala de la marca 30 grados ---")
+run(True, scale=30)

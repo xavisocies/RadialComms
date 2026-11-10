@@ -72,11 +72,22 @@ la que se haya movido en último lugar. La pulsación corta clica la que esté r
   o al entrar en un submenú el centro no se resalta, para que una pulsación corta no cierre la rueda por error.
 - Los giros del propio avión no cuentan como movimiento de cabeza.
 
+### El punto y la línea de la mirada
+Para saber hacia dónde apunta tu cabeza, la rueda dibuja una marca blanca:
+
+- **Un punto** que se mueve con tu cabeza. Al abrir la rueda está en el centro y llega al borde cuando giras 15°.
+- **Una línea** del centro al punto, que aparece cuando sales de la zona muerta (7°), es decir, cuando la
+  mirada empieza a señalar una cuña. Al volver al centro la línea desaparece y el punto se queda.
+
+La marca siempre muestra la cabeza. El ratón no tiene marca y funciona como siempre.
+
 ### Opciones (`Saved Games\DCS\Config\RadialCommsConfig.lua`)
 ```lua
 longPressSeconds = 1.0,  -- segundos manteniendo el botón para que cuente como larga
 headSelect = true,       -- resaltar cuñas con la cabeza (false = solo cursor)
 headDeadzone = 7,        -- grados que hay que girar la cabeza antes de resaltar
+headMark = true,         -- punto y línea de la mirada (false = ocultarlos)
+headMarkScale = 15,      -- grados de giro con los que el punto llega al borde
 ```
 Reinicia DCS tras cambiarlas. Si el valor no es un número mayor que 0 se usa el de por defecto.
 

@@ -38,6 +38,12 @@ return {
     headSelect = true,
     headDeadzone = 7,   -- grados que hay que girar la cabeza antes de resaltar (mayor que 0; si no, 7)
 
+    -- Marca de la mirada: un punto blanco sobre la rueda marca hacia donde apunta tu cabeza y, al
+    -- salir de la zona muerta, una linea lo une con el centro. El raton no tiene marca.
+    -- Necesita headSelect = true. Ponlo en false para ocultar el punto y la linea.
+    headMark = true,
+    headMarkScale = 15, -- grados de giro con los que el punto llega al borde (mayor que 0; si no, 15)
+
     -- Ocultar en las listas de radio las estaciones que la radio no puede alcanzar ("[N/A]").
     hideUnavailable = true,
 

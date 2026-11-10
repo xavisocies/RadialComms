@@ -44,6 +44,8 @@ function M.start()
         headProbeSamples = 60,   -- maximo de muestras por apertura (60 x 0.5 s = 30 s)
         headSelect = true,       -- resaltar cuñas con la cabeza (VR / TrackIR); se elige con el boton
         headDeadzone = 7,        -- grados de giro desde la posicion inicial antes de resaltar un sector
+        headMark = true,         -- dibujar el punto y la linea que marcan hacia donde apunta la cabeza
+        headMarkScale = 15,      -- grados de giro con los que el punto llega al borde de la rueda
     }
 
     local defaultMenu = {
@@ -134,6 +136,8 @@ function M.start()
     local gesture = nil     -- pulsacion larga/corta de ese boton (Gesture.lua)
     local PointerMod = nil  -- modulo Pointer.lua (cursor + mirada)
     local pointer = nil     -- puntero de la rueda abierta: decide que cuña esta resaltada
+    local GazeMarkMod = nil -- modulo GazeMark.lua (geometria del punto y la linea de la mirada)
+    local gazeMark = nil    -- nil si la marca de la mirada esta desactivada
     local toggleWheel       -- abre/cierra la rueda (definida mas abajo)
     local render, setStatus -- se definen mas abajo (declaradas aqui para que las vea runAction)
     local wedge = nil       -- widgets del estilo de cuñas (nil si no se pudieron crear)
@@ -144,6 +148,10 @@ function M.start()
     local winW, winH = 440, 440 + 22
     local WEDGE_S, WEDGE_STRIP = 440, 22     -- lado de la imagen de la rueda y franja de titulo
     local WEDGE_R_IN, WEDGE_R_LABEL = 64, 134 -- radio del circulo central / radio de las etiquetas
+    local WEDGE_R_OUT = 204                   -- borde exterior de las cuñas
+    -- marca de la mirada: punto de 16 px y linea hecha de puntitos de 6 px, uno cada 4 px
+    local MARK_DOT, MARK_SEG, MARK_STEP = 16, 6, 4
+    local MARK_SEGS = math.floor(WEDGE_R_OUT / MARK_STEP)
     -- Colores de cuña disponibles (cada uno tiene sus imagenes en img\\); "color" en el menu elige uno
     local THEMES = { "blue", "green", "amber", "teal", "purple", "red", "grey" }
     local THEME_OK = {}
@@ -804,6 +812,33 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
 
     local hoverSector = nil -- sector bajo el raton en el estilo de cuñas (0 = centro)
 
+    -- Marca de la mirada (spec 002): un punto que marca hacia donde apunta la cabeza y, fuera de la
+    -- zona muerta, una linea del centro al punto. dxgui no dibuja lineas: es una hilera de puntitos.
+    -- Solo es dibujo: no decide que cuña se resalta ni se clica (eso es el puntero).
+    local function hideMark()
+        local mk = wedge and wedge.mark
+        if not mk then return end
+        mk.dot:setVisible(false)
+        for i = 1, mk.shown do mk.seg[i]:setVisible(false) end
+        mk.shown = 0
+    end
+
+    local function updateMark(dYaw, dPitch)
+        local mk = wedge and wedge.mark
+        if not (mk and gazeMark) then return end
+        local cx, cy = WEDGE_S / 2, WEDGE_STRIP + WEDGE_S / 2
+        local x, y, line = gazeMark.compute(dYaw, dPitch)
+        mk.dot:setBounds(math.floor(cx + x - MARK_DOT / 2 + 0.5), math.floor(cy + y - MARK_DOT / 2 + 0.5), MARK_DOT, MARK_DOT)
+        mk.dot:setVisible(true)
+        local pts = line and GazeMarkMod.segments(x, y, #mk.seg, MARK_STEP) or {}
+        for i = 1, #pts do
+            mk.seg[i]:setBounds(math.floor(cx + pts[i].x - MARK_SEG / 2 + 0.5), math.floor(cy + pts[i].y - MARK_SEG / 2 + 0.5), MARK_SEG, MARK_SEG)
+            mk.seg[i]:setVisible(true)
+        end
+        for i = #pts + 1, mk.shown do mk.seg[i]:setVisible(false) end
+        mk.shown = #pts
+    end
+
     local function updateHover(sec)
         hoverSector = sec
         if not wedge then return end
@@ -1148,6 +1183,16 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         w.centerNormal = mk(w.skin.blue.center, 0, WEDGE_STRIP, WEDGE_S, WEDGE_S)
         w.centerHover = mk(staticSkin(dir .. "center_h.png"), 0, WEDGE_STRIP, WEDGE_S, WEDGE_S)
         w.centerHover:setVisible(false)
+        -- marca de la mirada: encima de las cuñas y del centro, debajo de los textos (que se crean despues).
+        -- Primero los puntitos de la linea y, encima, el punto.
+        w.mark = { seg = {}, shown = 0 }
+        local segSkin = staticSkin(dir .. "gaze_seg.png")
+        for i = 1, MARK_SEGS do
+            w.mark.seg[i] = mk(segSkin, 0, 0, MARK_SEG, MARK_SEG)
+            w.mark.seg[i]:setVisible(false)
+        end
+        w.mark.dot = mk(staticSkin(dir .. "gaze_dot.png"), 0, 0, MARK_DOT, MARK_DOT)
+        w.mark.dot:setVisible(false)
         local lw, lh = 110, 44
         for i = 1, 8 do
             local a = math.rad(-90 + (i - 1) * 45)
@@ -1249,6 +1294,7 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         }) or nil
         applyStyle()
         updateHover(nil)
+        hideMark() -- el punto aparece con la primera muestra de la cabeza
         isHidden = false
 
         if config.runProbe and not probeDone then
@@ -1265,6 +1311,7 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         -- asi que se cambia a una skin invisible y se quita el cursor.
         window:setSkin(windowSkinHidden)
         panel:setVisible(false)
+        hideMark()
         window:setHasCursor(false)
         isHidden = true
     end
@@ -1288,23 +1335,31 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         return wrap180(yaw), pitch
     end
 
+    local HEAD_TAU = 0.12 -- s: constante de tiempo del suavizado (la cabeza tiembla unos grados)
+
+    -- Se llama en cada frame con la rueda abierta. El suavizado depende del tiempo transcurrido,
+    -- no del numero de frames, para que se comporte igual a cualquier FPS.
     local function headTick()
         local t = nowSeconds()
-        if t - headSel.lastT < 0.05 then return end
-        headSel.lastT = t
-
         local yaw, pitch = headAngles()
         if not yaw then return end
         if not headSel.ref then
             headSel.ref = { yaw = yaw, pitch = pitch }
+            headSel.lastT = t
             log(string.format("HEADSEL: referencia yaw=%.1f pitch=%.1f", yaw, pitch))
+            updateMark(0, 0)
             return
         end
 
-        -- suavizado: la cabeza tiembla unos grados
-        local k = 0.35
-        headSel.dy = headSel.dy + k * (wrap180(yaw - headSel.ref.yaw) - headSel.dy)
-        headSel.dp = headSel.dp + k * ((pitch - headSel.ref.pitch) - headSel.dp)
+        local dt = t - headSel.lastT
+        headSel.lastT = t
+        if dt > 0 then
+            local k = 1 - math.exp(-dt / HEAD_TAU)
+            headSel.dy = headSel.dy + k * (wrap180(yaw - headSel.ref.yaw) - headSel.dy)
+            headSel.dp = headSel.dp + k * ((pitch - headSel.ref.pitch) - headSel.dp)
+        end
+
+        updateMark(headSel.dy, headSel.dp)
 
         if not pointer then return end
         pointer.gaze(headSel.dy, headSel.dp)
@@ -1345,6 +1400,18 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
             PointerMod = PM
         else
             log("No se pudo cargar Pointer.lua (el cursor resaltara sin puntero): " .. tostring(PM))
+        end
+
+        if config.headMark ~= false then
+            local okm, GM = pcall(function()
+                return dofile(lfs.writedir() .. "Scripts/RadialComms/GazeMark.lua")
+            end)
+            if okm and GM then
+                GazeMarkMod = GM
+                gazeMark = GM.new({ scale = config.headMarkScale, deadzone = config.headDeadzone, radius = WEDGE_R_OUT })
+            else
+                log("No se pudo cargar GazeMark.lua (sin punto ni linea de la mirada): " .. tostring(GM))
+            end
         end
 
         if config.joystickButton ~= false then
@@ -1461,7 +1528,7 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         log("Simulacion detenida")
     end
 
-    log("RadialComms v0.10.0 iniciado")
+    log("RadialComms v0.11.0 iniciado")
 end
 
 -- Si DCS llama antes de start(), los callbacks no hacen nada.

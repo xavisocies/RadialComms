@@ -55,4 +55,17 @@ for theme, (fill, outline) in THEMES.items():
 for i in range(1, 9):
     save(wedge(i, HOVER[0], HOVER[1], 2.0), f"wedge_h_{i}.png")
 save(center(HOVER[0], HOVER[1], 2.2), "center_h.png")
+
+def dot(size, white_r, lw):
+    """Punto blanco con borde oscuro fino (marca de la mirada), fondo transparente."""
+    im = Image.new("RGBA", (size * SS * 2, size * SS * 2), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    c, k = size * SS, SS * 2
+    r = white_r * k
+    d.ellipse([c - r - lw * k, c - r - lw * k, c + r + lw * k, c + r + lw * k], fill=(10, 14, 20, 200))
+    d.ellipse([c - r, c - r, c + r, c + r], fill=(255, 255, 255, 255))
+    return im.resize((size, size), Image.LANCZOS)
+
+save(dot(16, 5.5, 1.5), "gaze_dot.png")   # punto de la mirada
+save(dot(6, 1.8, 0.9), "gaze_seg.png")    # puntito de la linea
 print(len(os.listdir(OUT)), "imagenes,", sum(os.path.getsize(os.path.join(OUT, f)) for f in os.listdir(OUT)) // 1024, "KB")
