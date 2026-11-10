@@ -67,9 +67,11 @@ la que se haya movido en último lugar. La pulsación corta clica la que esté r
 
 - **Cabeza (VR o TrackIR):** al abrir la rueda, tu mirada de ese momento es el centro. Gira la cabeza
   unos 7° hacia una cuña para resaltarla. **Mirar una cuña nunca la ejecuta por sí solo**: hay que pulsar el botón.
-- **Volver atrás con la cabeza:** mira una cuña (con opción) y vuelve a mirar al centro: el centro se resalta
-  y una pulsación corta retrocede (o cierra la rueda si estás en el menú principal). Justo al abrir la rueda
-  o al entrar en un submenú el centro no se resalta, para que una pulsación corta no cierre la rueda por error.
+- **Volver atrás con la cabeza:** dentro de un submenú, mira al centro: se resalta y una pulsación corta
+  vuelve atrás.
+- **Cerrar desde el menú principal:** usa la pulsación larga. El centro del menú principal solo se resalta
+  después de mirar una cuña y volver al centro, para que una pulsación corta justo al abrir la rueda (o al
+  volver atrás) no la cierre por error.
 - Los giros del propio avión no cuentan como movimiento de cabeza.
 
 ### El punto y la línea de la mirada

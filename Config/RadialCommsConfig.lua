@@ -33,7 +33,7 @@ return {
 
     -- Resaltar cuñas con la cabeza (VR/TrackIR): al abrir la rueda se toma tu mirada como centro.
     -- Gira la cabeza hacia una cuña para resaltarla y pulsa el boton (pulsacion corta) para elegirla;
-    -- mirar una cuña nunca la ejecuta por si solo. Para volver atras, mira una cuña y luego al centro.
+    -- mirar una cuña nunca la ejecuta por si solo. En un submenu, mira al centro y pulsa para volver atras.
     -- Ponlo en false para usar solo el cursor del raton.
     headSelect = true,
     headDeadzone = 7,   -- grados que hay que girar la cabeza antes de resaltar (mayor que 0; si no, 7)

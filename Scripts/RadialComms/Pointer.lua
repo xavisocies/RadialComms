@@ -43,13 +43,19 @@ function P.new(opts)
     -- hasItem(sec): la cuña tiene opcion en el menu actual (por defecto, todas la tienen)
     local hasItem = type(opts.hasItem) == "function" and opts.hasItem or function() return true end
 
+    -- centerAlways(): true si el centro debe resaltarse siempre que la mirada este en la zona muerta
+    -- (en un submenu, donde el centro es "atras"). Por defecto no: hay que "armarlo" (ver abajo).
+    local centerAlways = type(opts.centerAlways) == "function" and opts.centerAlways or function() return false end
+
     local self = {}
     local mouseSec, gazeSec = nil, nil
+    local gazeSeen = false -- ya ha llegado algun dato de la mirada
     local last = nil -- "mouse" o "gaze": la fuente que cambio en ultimo lugar
 
-    -- Centro "armado": la mirada solo resalta el centro (0) al volver a la zona muerta DESPUES de
-    -- haber mirado una cuña con opcion. Asi, justo al abrir la rueda o al entrar en un submenu, una
-    -- pulsacion corta no cierra ni retrocede por accidente.
+    -- Centro "armado" (menu principal): la mirada solo resalta el centro (0) al volver a la zona muerta
+    -- DESPUES de haber mirado una cuña con opcion. Asi, justo al abrir la rueda o al volver al menu
+    -- principal, una pulsacion corta no cierra la rueda por accidente. En un submenu (centerAlways)
+    -- no hace falta armarlo: mirar al centro lo resalta siempre, para volver atras.
     local armed = false
     local gazeRaw = nil -- sector que senala la cabeza ahora (1-8) o nil en la zona muerta
     local skipSec = nil -- cuña que ya se miraba al cambiar de nivel: no arma el centro
@@ -67,8 +73,9 @@ function P.new(opts)
             armed = true
         end
         gazeRaw = raw
+        gazeSeen = true
         local sec = raw
-        if sec == nil and armed then
+        if sec == nil and (armed or centerAlways()) then
             sec = 0
         end
         if sec ~= gazeSec then
@@ -83,6 +90,9 @@ function P.new(opts)
         armed = false
         skipSec = gazeRaw
         gazeSec = gazeRaw
+        if gazeSec == nil and gazeSeen and centerAlways() then
+            gazeSec = 0
+        end
     end
 
     function self.current()

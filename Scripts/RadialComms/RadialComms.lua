@@ -1287,6 +1287,7 @@ return 'OK|sintonizado ' .. devId .. ' a ' .. freqHz .. ' (seleccion=' .. tostri
         -- puntero nuevo en cada apertura: no queda nada resaltado de la anterior (una pulsacion corta lo clicaria)
         pointer = PointerMod and PointerMod.new({
             deadzone = config.headDeadzone,
+            centerAlways = function() return #stack > 1 end, -- en un submenu, mirar al centro = atras
             hasItem = function(sec)
                 local items = currentNode().items
                 return items ~= nil and items[sec] ~= nil

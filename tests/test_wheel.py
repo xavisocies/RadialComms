@@ -555,6 +555,32 @@ end
 look(0, 0); fresh(); sel(4); assert(labidx("Asignar boton"), "clic de raton igual que antes")
 hover(0); shortClick(); assert(lab(1):find("COM1", 1, true), "pulsacion corta igual que antes")
 print("MARCA MIRADA OK")
+
+-- === Centro = atras en los submenus (spec 001, T11 / RF-23) ===
+if HEAD_ON then
+  -- con la cabeza: entrar en Herramientas y volver mirando directamente al centro
+  openAt0(); unhover(); look(15, -15); frames(15); onlyHover(4); shortClick()
+  assert(labidx("Asignar boton"), "entro en Herramientas")
+  look(0, 0); frames(15); assert(hvc() == true, "submenu: mirar al centro lo resalta sin mirar antes otra cuña")
+  shortClick(); assert(lab(1):find("COM1", 1, true), "la corta sobre el centro vuelve atras")
+  -- en el principal, recien vuelto, el centro no queda resaltado y otra corta no cierra la rueda
+  frames(5); assert(hvc() == false, "principal: el centro no queda resaltado")
+  shortClick(); assert(window.cursor == true and lab(1):find("COM1", 1, true), "una segunda corta seguida no cierra la rueda")
+  -- entrar con el raton mientras se mira al centro: el centro queda resaltado y la corta vuelve atras
+  openAt0(); frames(5); sel(4); assert(labidx("Asignar boton")); frames(2)
+  assert(hvc() == true, "submenu abierto con el raton: el centro queda resaltado por la mirada")
+  shortClick(); assert(lab(1):find("COM1", 1, true), "y la corta vuelve atras")
+  -- dos niveles (COM1 > ATC): mirar al centro y pulsar vuelve de uno en uno
+  openAt0(); look(0, 15); frames(15); onlyHover(1); shortClick(); assert(findtxt("< COM1"), "entro en COM1")
+  frames(15); shortClick(); assert(lab(1):find("Base", 1, true), "entro en ATC (sigue mirando la cuña 1)")
+  look(0, 0); frames(15); assert(hvc() == true); shortClick(); assert(lab(1):find("ATC", 1, true), "vuelve a COM1")
+  frames(5); assert(hvc() == true, "sigue en un submenu: el centro sigue resaltado"); shortClick()
+  assert(lab(1):find("COM1", 1, true) and not findtxt("< COM1"), "vuelve al principal")
+  frames(5); assert(hvc() == false and window.cursor == true)
+  balanced("centro-atras")
+end
+fresh()
+print("CENTRO ATRAS OK")
 fresh(); Export = nil
 print("MIRADA PUNTERO OK")
 -- DCS rehace la pila: se repone
@@ -792,6 +818,42 @@ do
   table.sort(api)
   assert(table.concat(api, ",") == "current,gaze,mouse,reset", "API del puntero: " .. table.concat(api, ","))
 end
+
+-- ===== Pointer (spec 001, T11 / RF-23): en un submenu el centro se resalta siempre =====
+do
+  local inSub = false
+  local function new() return Pointer.new({ hasItem = function(s) return s <= 4 end, centerAlways = function() return inSub end }) end
+  -- menu principal: como antes (hay que mirar una cuña primero)
+  local p = new()
+  p.gaze(0, 0); assert(p.current() == nil, "principal: el centro no se resalta al abrir")
+  -- submenu: la zona muerta resalta el centro sin armar
+  inSub = true
+  local q = new()
+  q.gaze(0, 0); assert(q.current() == 0, "submenu: la zona muerta resalta el centro")
+  q.gaze(0, 10); assert(q.current() == 1); q.gaze(0, 0); assert(q.current() == 0)
+  -- entrar en un submenu mirando la cuña elegida y volver al centro: se resalta
+  inSub = false
+  local r = new()
+  r.gaze(0, 10); assert(r.current() == 1)
+  inSub = true; r.reset()
+  assert(r.current() == 1, "sigue mirando la cuña")
+  r.gaze(0, 0); assert(r.current() == 0, "submenu: al volver a la zona muerta se resalta el centro sin mirar otra cuña")
+  -- cambiar a un submenu con la mirada ya en la zona muerta: el centro queda resaltado tras el reset
+  inSub = false
+  local t = new()
+  t.gaze(0, 0); assert(t.current() == nil)
+  inSub = true; t.reset(); assert(t.current() == 0, "submenu: tras cambiar de nivel mirando al centro, queda resaltado")
+  -- volver al principal mirando al centro: se desarma
+  inSub = false; t.reset(); assert(t.current() == nil, "principal: recien vuelto, el centro no queda resaltado")
+  t.gaze(0, 0); assert(t.current() == nil)
+  -- sin datos de mirada, el reset en un submenu no inventa el centro
+  inSub = true
+  local u = new(); u.mouse(2); u.reset(); assert(u.current() == 2)
+  u.mouse(nil); assert(u.current() == nil, "sin mirada no hay centro aunque sea un submenu")
+  -- el cursor sigue mandando si cambio el ultimo
+  local v = new(); v.gaze(0, 0); v.mouse(3); assert(v.current() == 3); v.mouse(nil); assert(v.current() == 0)
+end
+print("POINTER SUBMENU OK")
 print("POINTER CENTRO OK")
 
 -- ===== GazeMark (spec 002, T1): posicion del punto y si hay linea =====
